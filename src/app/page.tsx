@@ -106,6 +106,20 @@ function formatarData(date: Date): string {
   return date.toLocaleDateString('pt-BR');
 }
 
+// Safe platform detection (never throws)
+function detectPlatform() {
+  if (typeof window === 'undefined') {
+    return { isStandalone: false, isIOS: false, hasNotificationAPI: false, hasServiceWorker: false };
+  }
+  const isStandalone =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as Record<string, unknown>).standalone === true;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const hasNotificationAPI = 'Notification' in window;
+  const hasServiceWorker = 'serviceWorker' in navigator;
+  return { isStandalone, isIOS, hasNotificationAPI, hasServiceWorker };
+}
+
 // ==========================================
 // Main Page Component
 // ==========================================
@@ -116,12 +130,7 @@ export default function HomePage() {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const [swReady, setSwReady] = useState(false);
-  const [swError, setSwError] = useState(() => {
-    if (typeof window !== 'undefined' && !('serviceWorker' in navigator)) {
-      return 'Seu navegador não suporta Service Workers. Tente usar o Chrome.';
-    }
-    return '';
-  });
+  const [swError, setSwError] = useState('');
   const ultimoAlertaRef = useRef('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -144,7 +153,7 @@ export default function HomePage() {
     });
   }, []);
 
-  // Register Service Worker and check push subscription
+  // Register Service Worker
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
@@ -166,14 +175,6 @@ export default function HomePage() {
             setSwError('');
           }
         } else {
-          // Wait for it to become active
-          registration.addEventListener('activate', () => {
-            if (!cancelled) {
-              setSwReady(true);
-              setSwError('');
-            }
-          });
-
           // Also try navigator.serviceWorker.ready as fallback
           const readyReg = await navigator.serviceWorker.ready;
           if (!cancelled) {
@@ -196,73 +197,63 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Detect if running as installed PWA (standalone mode)
-  const isStandalone = typeof window !== 'undefined' && (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as any).standalone === true
-  );
-
-  // Detect iOS
-  const isIOS = typeof window !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
-
-  // Detect if Notification API is available
-  const notificationAvailable = typeof Notification !== 'undefined';
+  // Detect platform for UI rendering
+  const platform = typeof window !== 'undefined' ? detectPlatform() : { isStandalone: false, isIOS: false, hasNotificationAPI: false, hasServiceWorker: false };
 
   // Enable push notifications
   const enablePush = async () => {
     setPushLoading(true);
 
-    try {
-      // === iOS / Safari special handling ===
-      // On iOS, Notification API only exists when running as installed PWA
-      if (!notificationAvailable) {
-        if (isIOS) {
-          if (isStandalone) {
-            // Running as PWA but Notification still not available - iOS version too old
-            alert(
-              '⚠️ Seu iPhone precisa do iOS 16.4 ou superior para notificações push.\n\n' +
-              'Verifique em: Ajustes → Geral → Sobre → Versão do iOS'
-            );
-          } else {
-            // Not running as PWA - need to install first
-            alert(
-              '📱 No iPhone, as notificações push SÓ funcionam como aplicativo instalado.\n\n' +
-              'Siga estes passos:\n\n' +
-              '1. Toque no ícone de compartilhar (⬆️) na parte inferior do Safari\n' +
-              '2. Role para baixo e toque em "Adicionar à Tela Inicial"\n' +
-              '3. Toque em "Adicionar"\n' +
-              '4. Abra o app pelo ícone na tela inicial\n' +
-              '5. Dentro do app, clique em "Ativar Notificações" novamente\n\n' +
-              '⚠️ Requer iOS 16.4 ou superior'
-            );
-          }
-        } else {
-          // Not iOS but Notification API not available
+    const { isStandalone, isIOS, hasNotificationAPI, hasServiceWorker } = detectPlatform();
+
+    // === Step 1: Check if Notification API exists ===
+    // On iOS Safari, Notification only exists in standalone (installed PWA) mode
+    if (!hasNotificationAPI) {
+      if (isIOS) {
+        if (isStandalone) {
           alert(
-            'Seu navegador não suporta notificações push.\n\n' +
-            'Tente usar o Google Chrome atualizado.'
+            '⚠️ Seu iPhone precisa do iOS 16.4 ou superior para notificações push.\n\n' +
+            'Verifique em: Ajustes → Geral → Sobre → Versão do iOS'
+          );
+        } else {
+          alert(
+            '📱 No iPhone, as notificações SÓ funcionam como app instalado!\n\n' +
+            'Siga EXATAMENTE estes passos:\n\n' +
+            '1. Toque no ícone de COMPARTILHAR (⬆️ quadrado com seta) na parte de BAIXO do Safari\n' +
+            '2. Role para baixo e toque em "Adicionar à Tela Inicial"\n' +
+            '3. Toque em "Adicionar"\n' +
+            '4. FECHE o Safari e abra o app pelo ÍCONE na tela inicial\n' +
+            '5. Dentro do app instalado, clique em "Ativar Notificações"\n\n' +
+            '⚠️ Requer iOS 16.4 ou superior'
           );
         }
-        setPushLoading(false);
-        return;
+      } else {
+        alert(
+          'Seu navegador não suporta notificações push.\n\n' +
+          'Tente usar o Google Chrome atualizado.'
+        );
       }
+      setPushLoading(false);
+      return;
+    }
 
-      // === Check Service Worker support ===
-      if (!('serviceWorker' in navigator)) {
-        alert('Seu navegador não suporta Service Workers. Tente usar o Chrome ou Safari atualizado.');
-        setPushLoading(false);
-        return;
-      }
+    // === Step 2: Check Service Worker support ===
+    if (!hasServiceWorker) {
+      alert('Seu navegador não suporta Service Workers. Tente usar o Chrome ou Safari atualizado.');
+      setPushLoading(false);
+      return;
+    }
 
-      // === Request notification permission ===
-      const permission = await Notification.requestPermission();
+    try {
+      // === Step 3: Request notification permission ===
+      const permission = await window.Notification.requestPermission();
       if (permission !== 'granted') {
         alert('Permissão de notificação negada. Por favor, permita notificações nas configurações do navegador.');
         setPushLoading(false);
         return;
       }
 
-      // === Make sure SW is registered ===
+      // === Step 4: Make sure SW is registered ===
       let registration: ServiceWorkerRegistration;
       try {
         registration = await navigator.serviceWorker.ready;
@@ -278,7 +269,7 @@ export default function HomePage() {
         }
       }
 
-      // === Get VAPID public key ===
+      // === Step 5: Get VAPID public key ===
       const vapidResponse = await fetch('/api/vapid-public-key');
       const { publicKey } = await vapidResponse.json();
 
@@ -288,7 +279,7 @@ export default function HomePage() {
         return;
       }
 
-      // === Register push subscription ===
+      // === Step 6: Register push subscription ===
       let subscription = await registration.pushManager.getSubscription();
 
       if (!subscription) {
@@ -298,7 +289,7 @@ export default function HomePage() {
         });
       }
 
-      // === Save subscription to server ===
+      // === Step 7: Save subscription to server ===
       const saveResponse = await fetch('/api/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -313,14 +304,23 @@ export default function HomePage() {
       } else {
         alert('Erro ao salvar inscrição no servidor.');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error enabling push:', error);
-      const msg = error?.message || '';
+      const msg = error instanceof Error ? error.message : '';
 
-      if (msg.includes('gcm_sender_id') || msg.includes('manifest')) {
-        alert('Erro de configuração do PWA. Adicione o site à tela inicial e abra pelo ícone.');
+      if (msg.includes('Notification') || msg.includes('notification')) {
+        alert(
+          '📱 No iPhone, as notificações SÓ funcionam como app instalado!\n\n' +
+          '1. Toque no ícone de COMPARTILHAR (⬆️) na parte de BAIXO do Safari\n' +
+          '2. Toque em "Adicionar à Tela Inicial"\n' +
+          '3. Abra o app pelo ÍCONE na tela inicial\n' +
+          '4. Clique em "Ativar Notificações" dentro do app\n\n' +
+          '⚠️ Requer iOS 16.4+'
+        );
+      } else if (msg.includes('gcm_sender_id') || msg.includes('manifest')) {
+        alert('Erro de configuração do PWA. Adicione o site à tela inicial do celular e abra pelo ícone.');
       } else if (msg.includes('permission') || msg.includes('denied')) {
-        alert('Permissão de notificação negada. Vá nas configurações e permita notificações para este site.');
+        alert('Permissão de notificação negada. Vá nas configurações do navegador e permita notificações para este site.');
       } else {
         alert(`Erro ao ativar notificações: ${msg || 'Tente novamente.'}`);
       }
@@ -462,18 +462,6 @@ export default function HomePage() {
     return { total, feitos, possuiPendentes };
   };
 
-  // Find the last day with marked items for scrolling
-  const getUltimoDia = (t: Tratamento, index: number) => {
-    let ultimoDia = 0;
-    for (let d = 0; d < t.dias; d++) {
-      for (let h = 0; h < t.horarios.length; h++) {
-        const id = `${index}_${d}_${h}`;
-        if (marcacoes[id]) ultimoDia = d;
-      }
-    }
-    return ultimoDia;
-  };
-
   return (
     <div className="min-h-screen bg-[#111827] text-white p-4 pb-24" style={{ fontFamily: 'Arial, sans-serif' }}>
       {/* Header */}
@@ -552,7 +540,6 @@ export default function HomePage() {
           if (filtroPendentes && !possuiPendentes) return null;
 
           const isAberto = cardAberto === index;
-          const ultimoDia = getUltimoDia(t, index);
           const progresso = total > 0 ? Math.round((feitos / total) * 100) : 0;
 
           return (
@@ -630,61 +617,41 @@ export default function HomePage() {
         })}
       </div>
 
-      {/* Push notification info */}
-      {!pushEnabled && (
+      {/* iOS Install Instructions - shown when on iOS and NOT in standalone mode */}
+      {platform.isIOS && !platform.isStandalone && !pushEnabled && (
+        <div className="mt-6 bg-blue-900/30 border border-blue-500/50 rounded-xl p-4">
+          <div className="font-bold text-blue-400 mb-2">📱 iPhone: Siga estes passos!</div>
+          <div className="text-sm text-blue-200/80 space-y-2">
+            <div>No iPhone, as notificações push SÓ funcionam quando o app está instalado na tela inicial.</div>
+            <div className="font-bold text-blue-300 mt-2">Passo a passo:</div>
+            <div className="bg-blue-900/40 rounded-lg p-3 space-y-1">
+              <div>1️⃣ Toque no ícone <strong>COMPARTILHAR</strong> (⬆️ quadrado com seta) na parte de BAIXO da tela</div>
+              <div>2️⃣ Role para baixo e toque em <strong>&quot;Adicionar à Tela Inicial&quot;</strong></div>
+              <div>3️⃣ Toque em <strong>&quot;Adicionar&quot;</strong></div>
+              <div>4️⃣ <strong>FECHE o Safari</strong> e abra o app pelo <strong>ícone na tela inicial</strong></div>
+              <div>5️⃣ Dentro do app instalado, clique em <strong>&quot;🔔 Ativar Notificações&quot;</strong></div>
+            </div>
+            <div className="text-xs text-blue-300/60 mt-2">
+              ⚠️ Requer iOS 16.4 ou superior. Verifique em: Ajustes → Geral → Sobre → Versão
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Push notification info - shown when not on iOS or already in standalone mode */}
+      {!pushEnabled && !(platform.isIOS && !platform.isStandalone) && (
         <div className="mt-6 bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-4">
           <div className="font-bold text-yellow-400 mb-2">🔔 Ative as notificações!</div>
-
-          {isIOS && !isStandalone ? (
-            /* iPhone - not installed as PWA */
-            <div className="space-y-3">
-              <div className="text-sm text-yellow-200/80">
-                No iPhone, as notificações push <span className="font-bold text-yellow-300">SÓ funcionam como aplicativo instalado</span>. Siga os passos abaixo:
-              </div>
-              <div className="bg-black/30 rounded-xl p-3 space-y-2">
-                <div className="font-bold text-yellow-300 text-sm">📱 Passo a passo:</div>
-                <div className="text-sm text-yellow-200/80">
-                  <span className="text-yellow-300 font-bold">1.</span> Toque no ícone de compartilhar <span className="text-lg">⬆️</span> na parte inferior do Safari
-                </div>
-                <div className="text-sm text-yellow-200/80">
-                  <span className="text-yellow-300 font-bold">2.</span> Role para baixo e toque em <span className="font-bold">&quot;Adicionar à Tela Inicial&quot;</span>
-                </div>
-                <div className="text-sm text-yellow-200/80">
-                  <span className="text-yellow-300 font-bold">3.</span> Toque em <span className="font-bold">&quot;Adicionar&quot;</span>
-                </div>
-                <div className="text-sm text-yellow-200/80">
-                  <span className="text-yellow-300 font-bold">4.</span> <span className="font-bold text-green-400">Abra o app pelo ícone</span> na tela inicial do celular
-                </div>
-                <div className="text-sm text-yellow-200/80">
-                  <span className="text-yellow-300 font-bold">5.</span> Dentro do app, clique em <span className="font-bold">&quot;🔔 Ativar Notificações&quot;</span>
-                </div>
-              </div>
-              <div className="text-xs text-yellow-200/50">
-                ⚠️ Requer iOS 16.4 ou superior • Verifique em: Ajustes → Geral → Sobre → Versão
-              </div>
-            </div>
-          ) : isIOS && isStandalone ? (
-            /* iPhone - installed as PWA */
-            <div className="space-y-2">
-              <div className="text-sm text-yellow-200/80">
-                App instalado! Agora clique em <span className="font-bold">&quot;🔔 Ativar Notificações&quot;</span> acima para ativar os alertas.
-              </div>
-            </div>
-          ) : (
-            /* Android / Desktop */
-            <div className="space-y-2">
-              <div className="text-sm text-yellow-200/80">
-                Para receber alertas na tela de bloqueio quando for hora de tomar seus remédios.
-              </div>
-              <div className="text-sm text-yellow-200/70 space-y-1">
-                <div className="font-bold text-yellow-300">📱 Instruções:</div>
-                <div>1. Clique em &quot;Ativar Notificações&quot; acima</div>
-                <div>2. Permita as notificações quando o navegador perguntar</div>
-                <div>3. No menu do navegador (⋮), toque em &quot;Adicionar à tela inicial&quot;</div>
-                <div>4. Abra o app pelo ícone na tela inicial</div>
-              </div>
-            </div>
-          )}
+          <div className="text-sm text-yellow-200/80 mb-3">
+            Para receber alertas na tela de bloqueio do celular quando for hora de tomar seus remédios.
+          </div>
+          <div className="text-sm text-yellow-200/70 space-y-1">
+            <div className="font-bold text-yellow-300">📱 Instruções:</div>
+            <div>1. Clique em &quot;Ativar Notificações&quot; acima</div>
+            <div>2. Permita as notificações quando o navegador perguntar</div>
+            <div>3. No menu do navegador (⋮), toque em &quot;Adicionar à tela inicial&quot;</div>
+            <div>4. Abra o app pelo ícone na tela inicial</div>
+          </div>
         </div>
       )}
     </div>
