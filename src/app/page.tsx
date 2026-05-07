@@ -116,6 +116,12 @@ export default function HomePage() {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const [swReady, setSwReady] = useState(false);
+  const [swError, setSwError] = useState(() => {
+    if (typeof window !== 'undefined' && !('serviceWorker' in navigator)) {
+      return 'Seu navegador não suporta Service Workers. Tente usar o Chrome.';
+    }
+    return '';
+  });
   const ultimoAlertaRef = useRef('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -144,40 +150,88 @@ export default function HomePage() {
 
     let cancelled = false;
 
-    navigator.serviceWorker.register('/sw.js')
-      .then(async (registration) => {
+    const registerSW = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
         console.log('SW registered:', registration.scope);
+
         if (cancelled) return;
 
-        // Check existing push subscription
-        const subscription = await registration.pushManager.getSubscription();
-        if (!cancelled) {
-          setPushEnabled(!!subscription);
-          setSwReady(true);
+        // Wait for the service worker to be ready/active
+        if (registration.active) {
+          const subscription = await registration.pushManager.getSubscription();
+          if (!cancelled) {
+            setPushEnabled(!!subscription);
+            setSwReady(true);
+            setSwError('');
+          }
+        } else {
+          // Wait for it to become active
+          registration.addEventListener('activate', () => {
+            if (!cancelled) {
+              setSwReady(true);
+              setSwError('');
+            }
+          });
+
+          // Also try navigator.serviceWorker.ready as fallback
+          const readyReg = await navigator.serviceWorker.ready;
+          if (!cancelled) {
+            const subscription = await readyReg.pushManager.getSubscription();
+            setPushEnabled(!!subscription);
+            setSwReady(true);
+            setSwError('');
+          }
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         console.error('SW registration failed:', error);
-      });
+        if (!cancelled) {
+          setSwError('Erro ao registrar Service Worker. Tente recarregar a página.');
+        }
+      }
+    };
+
+    registerSW();
 
     return () => { cancelled = true; };
   }, []);
 
   // Enable push notifications
   const enablePush = async () => {
-    if (!swReady) {
-      alert('Service Worker não está pronto. Aguarde um momento.');
-      return;
-    }
-
     setPushLoading(true);
+
     try {
-      // Request notification permission
+      // Check if Service Workers are supported
+      if (!('serviceWorker' in navigator)) {
+        alert('Seu navegador não suporta notificações push. Por favor, use o Chrome ou Safari atualizado.');
+        setPushLoading(false);
+        return;
+      }
+
+      // Request notification permission first
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
         alert('Permissão de notificação negada. Por favor, permita notificações nas configurações do navegador.');
         setPushLoading(false);
         return;
+      }
+
+      // Make sure SW is registered - try to register again if needed
+      let registration: ServiceWorkerRegistration;
+      try {
+        registration = await navigator.serviceWorker.ready;
+      } catch {
+        // Try registering again
+        try {
+          registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+          // Wait a moment for it to activate
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          registration = await navigator.serviceWorker.ready;
+        } catch (regError) {
+          alert('Não foi possível registrar o Service Worker. Tente recarregar a página e tentar novamente.');
+          setPushLoading(false);
+          return;
+        }
       }
 
       // Get VAPID public key from server
@@ -190,12 +244,16 @@ export default function HomePage() {
         return;
       }
 
-      // Register push subscription
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: publicKey
-      });
+      // Check existing subscription first
+      let subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        // Register push subscription
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: publicKey
+        });
+      }
 
       // Send subscription to server
       const saveResponse = await fetch('/api/subscribe', {
@@ -206,13 +264,24 @@ export default function HomePage() {
 
       if (saveResponse.ok) {
         setPushEnabled(true);
+        setSwReady(true);
+        setSwError('');
         alert('✅ Notificações push ativadas! Você receberá alertas na tela de bloqueio quando for hora de tomar seus remédios.');
       } else {
         alert('Erro ao salvar inscrição no servidor.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error enabling push:', error);
-      alert('Erro ao ativar notificações push. Tente novamente.');
+
+      // Provide specific error messages
+      const msg = error?.message || '';
+      if (msg.includes('gcm_sender_id') || msg.includes('manifest')) {
+        alert('Erro de configuração do PWA. Adicione o site à tela inicial do celular e abra pelo ícone.');
+      } else if (msg.includes('permission') || msg.includes('denied')) {
+        alert('Permissão de notificação negada. Vá nas configurações do navegador e permita notificações para este site.');
+      } else {
+        alert(`Erro ao ativar notificações: ${msg || 'Tente novamente.'}`);
+      }
     }
     setPushLoading(false);
   };
@@ -413,6 +482,18 @@ export default function HomePage() {
             {pushEnabled ? '🔔 Notificações Ativas' : pushLoading ? '⏳ Ativando...' : '🔔 Ativar Notificações'}
           </button>
         </div>
+
+        {/* SW Status indicator */}
+        {swError && !pushEnabled && (
+          <div className="mt-2 text-red-400 text-xs">
+            ⚠️ {swError}
+          </div>
+        )}
+        {!swReady && !swError && !pushEnabled && (
+          <div className="mt-2 text-yellow-400 text-xs animate-pulse">
+            ⏳ Preparando sistema de notificações...
+          </div>
+        )}
       </div>
 
       {/* Next Medication Card */}
@@ -511,9 +592,18 @@ export default function HomePage() {
       {!pushEnabled && (
         <div className="mt-6 bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-4">
           <div className="font-bold text-yellow-400 mb-2">🔔 Ative as notificações!</div>
-          <div className="text-sm text-yellow-200/80">
-            Para receber alertas na tela de bloqueio do celular quando for hora de tomar seus remédios,
-            clique em &quot;Ativar Notificações&quot; acima. Depois adicione este site como aplicativo na tela inicial do celular.
+          <div className="text-sm text-yellow-200/80 mb-3">
+            Para receber alertas na tela de bloqueio do celular quando for hora de tomar seus remédios.
+          </div>
+          <div className="text-sm text-yellow-200/70 space-y-1">
+            <div className="font-bold text-yellow-300">📱 Instruções:</div>
+            <div>1. Clique em &quot;Ativar Notificações&quot; acima</div>
+            <div>2. Permita as notificações quando o navegador perguntar</div>
+            <div>3. No menu do navegador (⋮), toque em &quot;Adicionar à tela inicial&quot;</div>
+            <div>4. Abra o app pelo ícone na tela inicial</div>
+          </div>
+          <div className="mt-3 text-xs text-yellow-200/50">
+            ⚠️ No iPhone (iOS 16.4+), é necessário adicionar à tela inicial e abrir pelo ícone para que as notificações push funcionem.
           </div>
         </div>
       )}
