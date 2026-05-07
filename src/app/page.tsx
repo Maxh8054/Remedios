@@ -196,19 +196,65 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Detect if running as installed PWA (standalone mode)
+  const isStandalone = typeof window !== 'undefined' && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true
+  );
+
+  // Detect iOS
+  const isIOS = typeof window !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+  // Detect if Notification API is available
+  const notificationAvailable = typeof Notification !== 'undefined';
+
   // Enable push notifications
   const enablePush = async () => {
     setPushLoading(true);
 
     try {
-      // Check if Service Workers are supported
-      if (!('serviceWorker' in navigator)) {
-        alert('Seu navegador não suporta notificações push. Por favor, use o Chrome ou Safari atualizado.');
+      // === iOS / Safari special handling ===
+      // On iOS, Notification API only exists when running as installed PWA
+      if (!notificationAvailable) {
+        if (isIOS) {
+          if (isStandalone) {
+            // Running as PWA but Notification still not available - iOS version too old
+            alert(
+              '⚠️ Seu iPhone precisa do iOS 16.4 ou superior para notificações push.\n\n' +
+              'Verifique em: Ajustes → Geral → Sobre → Versão do iOS'
+            );
+          } else {
+            // Not running as PWA - need to install first
+            alert(
+              '📱 No iPhone, as notificações push SÓ funcionam como aplicativo instalado.\n\n' +
+              'Siga estes passos:\n\n' +
+              '1. Toque no ícone de compartilhar (⬆️) na parte inferior do Safari\n' +
+              '2. Role para baixo e toque em "Adicionar à Tela Inicial"\n' +
+              '3. Toque em "Adicionar"\n' +
+              '4. Abra o app pelo ícone na tela inicial\n' +
+              '5. Dentro do app, clique em "Ativar Notificações" novamente\n\n' +
+              '⚠️ Requer iOS 16.4 ou superior'
+            );
+          }
+        } else {
+          // Not iOS but Notification API not available
+          alert(
+            'Seu navegador não suporta notificações push.\n\n' +
+            'Tente usar o Google Chrome atualizado.'
+          );
+        }
         setPushLoading(false);
         return;
       }
 
-      // Request notification permission first
+      // === Check Service Worker support ===
+      if (!('serviceWorker' in navigator)) {
+        alert('Seu navegador não suporta Service Workers. Tente usar o Chrome ou Safari atualizado.');
+        setPushLoading(false);
+        return;
+      }
+
+      // === Request notification permission ===
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
         alert('Permissão de notificação negada. Por favor, permita notificações nas configurações do navegador.');
@@ -216,25 +262,23 @@ export default function HomePage() {
         return;
       }
 
-      // Make sure SW is registered - try to register again if needed
+      // === Make sure SW is registered ===
       let registration: ServiceWorkerRegistration;
       try {
         registration = await navigator.serviceWorker.ready;
       } catch {
-        // Try registering again
         try {
           registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-          // Wait a moment for it to activate
           await new Promise(resolve => setTimeout(resolve, 1000));
           registration = await navigator.serviceWorker.ready;
-        } catch (regError) {
-          alert('Não foi possível registrar o Service Worker. Tente recarregar a página e tentar novamente.');
+        } catch {
+          alert('Não foi possível registrar o Service Worker. Tente recarregar a página.');
           setPushLoading(false);
           return;
         }
       }
 
-      // Get VAPID public key from server
+      // === Get VAPID public key ===
       const vapidResponse = await fetch('/api/vapid-public-key');
       const { publicKey } = await vapidResponse.json();
 
@@ -244,18 +288,17 @@ export default function HomePage() {
         return;
       }
 
-      // Check existing subscription first
+      // === Register push subscription ===
       let subscription = await registration.pushManager.getSubscription();
 
       if (!subscription) {
-        // Register push subscription
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: publicKey
         });
       }
 
-      // Send subscription to server
+      // === Save subscription to server ===
       const saveResponse = await fetch('/api/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -272,13 +315,12 @@ export default function HomePage() {
       }
     } catch (error: any) {
       console.error('Error enabling push:', error);
-
-      // Provide specific error messages
       const msg = error?.message || '';
+
       if (msg.includes('gcm_sender_id') || msg.includes('manifest')) {
-        alert('Erro de configuração do PWA. Adicione o site à tela inicial do celular e abra pelo ícone.');
+        alert('Erro de configuração do PWA. Adicione o site à tela inicial e abra pelo ícone.');
       } else if (msg.includes('permission') || msg.includes('denied')) {
-        alert('Permissão de notificação negada. Vá nas configurações do navegador e permita notificações para este site.');
+        alert('Permissão de notificação negada. Vá nas configurações e permita notificações para este site.');
       } else {
         alert(`Erro ao ativar notificações: ${msg || 'Tente novamente.'}`);
       }
@@ -592,19 +634,57 @@ export default function HomePage() {
       {!pushEnabled && (
         <div className="mt-6 bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-4">
           <div className="font-bold text-yellow-400 mb-2">🔔 Ative as notificações!</div>
-          <div className="text-sm text-yellow-200/80 mb-3">
-            Para receber alertas na tela de bloqueio do celular quando for hora de tomar seus remédios.
-          </div>
-          <div className="text-sm text-yellow-200/70 space-y-1">
-            <div className="font-bold text-yellow-300">📱 Instruções:</div>
-            <div>1. Clique em &quot;Ativar Notificações&quot; acima</div>
-            <div>2. Permita as notificações quando o navegador perguntar</div>
-            <div>3. No menu do navegador (⋮), toque em &quot;Adicionar à tela inicial&quot;</div>
-            <div>4. Abra o app pelo ícone na tela inicial</div>
-          </div>
-          <div className="mt-3 text-xs text-yellow-200/50">
-            ⚠️ No iPhone (iOS 16.4+), é necessário adicionar à tela inicial e abrir pelo ícone para que as notificações push funcionem.
-          </div>
+
+          {isIOS && !isStandalone ? (
+            /* iPhone - not installed as PWA */
+            <div className="space-y-3">
+              <div className="text-sm text-yellow-200/80">
+                No iPhone, as notificações push <span className="font-bold text-yellow-300">SÓ funcionam como aplicativo instalado</span>. Siga os passos abaixo:
+              </div>
+              <div className="bg-black/30 rounded-xl p-3 space-y-2">
+                <div className="font-bold text-yellow-300 text-sm">📱 Passo a passo:</div>
+                <div className="text-sm text-yellow-200/80">
+                  <span className="text-yellow-300 font-bold">1.</span> Toque no ícone de compartilhar <span className="text-lg">⬆️</span> na parte inferior do Safari
+                </div>
+                <div className="text-sm text-yellow-200/80">
+                  <span className="text-yellow-300 font-bold">2.</span> Role para baixo e toque em <span className="font-bold">&quot;Adicionar à Tela Inicial&quot;</span>
+                </div>
+                <div className="text-sm text-yellow-200/80">
+                  <span className="text-yellow-300 font-bold">3.</span> Toque em <span className="font-bold">&quot;Adicionar&quot;</span>
+                </div>
+                <div className="text-sm text-yellow-200/80">
+                  <span className="text-yellow-300 font-bold">4.</span> <span className="font-bold text-green-400">Abra o app pelo ícone</span> na tela inicial do celular
+                </div>
+                <div className="text-sm text-yellow-200/80">
+                  <span className="text-yellow-300 font-bold">5.</span> Dentro do app, clique em <span className="font-bold">&quot;🔔 Ativar Notificações&quot;</span>
+                </div>
+              </div>
+              <div className="text-xs text-yellow-200/50">
+                ⚠️ Requer iOS 16.4 ou superior • Verifique em: Ajustes → Geral → Sobre → Versão
+              </div>
+            </div>
+          ) : isIOS && isStandalone ? (
+            /* iPhone - installed as PWA */
+            <div className="space-y-2">
+              <div className="text-sm text-yellow-200/80">
+                App instalado! Agora clique em <span className="font-bold">&quot;🔔 Ativar Notificações&quot;</span> acima para ativar os alertas.
+              </div>
+            </div>
+          ) : (
+            /* Android / Desktop */
+            <div className="space-y-2">
+              <div className="text-sm text-yellow-200/80">
+                Para receber alertas na tela de bloqueio quando for hora de tomar seus remédios.
+              </div>
+              <div className="text-sm text-yellow-200/70 space-y-1">
+                <div className="font-bold text-yellow-300">📱 Instruções:</div>
+                <div>1. Clique em &quot;Ativar Notificações&quot; acima</div>
+                <div>2. Permita as notificações quando o navegador perguntar</div>
+                <div>3. No menu do navegador (⋮), toque em &quot;Adicionar à tela inicial&quot;</div>
+                <div>4. Abra o app pelo ícone na tela inicial</div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
