@@ -16,8 +16,10 @@ model PushSubscription {
   updatedAt DateTime @updatedAt
 }
 
-model MedicationLog {
-  id            String   @id @default(cuid())
-  medicationKey String
-  takenAt       DateTime @default(now())
+model MedicationMark {
+  id        String   @id @default(cuid())
+  markKey   String   @unique
+  taken     Boolean  @default(true)
+  takenAt   DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

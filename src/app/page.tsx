@@ -70,27 +70,76 @@ export default function HomePage() {
   const [showQR, setShowQR] = useState(false);
   const [whatsappTestLoading, setWhatsappTestLoading] = useState(false);
   const [whatsappTestResult, setWhatsappTestResult] = useState<string | null>(null);
+  const [clearingCache, setClearingCache] = useState(false);
   const ultimoAlertaRef = useRef('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Initialize marcacoes from localStorage
-  const [marcacoes, setMarcacoesInner] = useState<Record<string, boolean>>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('marcacoes');
-      if (saved) {
-        try { return JSON.parse(saved); } catch { /* ignore */ }
+  // ==========================================
+  // Marcacoes - NOW from server with localStorage fallback
+  // ==========================================
+  const [marcacoes, setMarcacoes] = useState<Record<string, boolean>>({});
+  const [marcacoesLoaded, setMarcacoesLoaded] = useState(false);
+
+  // Fetch marks from server
+  const fetchMarks = useCallback(async () => {
+    try {
+      const response = await fetch('/api/marks');
+      const data = await response.json();
+      if (data.marks) {
+        setMarcacoes(data.marks);
+        // Also save to localStorage as offline backup
+        localStorage.setItem('marcacoes', JSON.stringify(data.marks));
+        if (!marcacoesLoaded) setMarcacoesLoaded(true);
+      }
+    } catch {
+      // Offline: use localStorage as fallback
+      if (!marcacoesLoaded) {
+        const saved = localStorage.getItem('marcacoes');
+        if (saved) {
+          try { setMarcacoes(JSON.parse(saved)); } catch { /* ignore */ }
+        }
+        setMarcacoesLoaded(true);
       }
     }
-    return {};
-  });
+  }, [marcacoesLoaded]);
 
-  const setMarcacoes = useCallback((value: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
-    setMarcacoesInner(prev => {
-      const next = typeof value === 'function' ? value(prev) : value;
-      localStorage.setItem('marcacoes', JSON.stringify(next));
-      return next;
+  // Load marks on mount and poll every 10 seconds for real-time sync
+  useEffect(() => {
+    fetchMarks();
+    const interval = setInterval(fetchMarks, 10000);
+    return () => clearInterval(interval);
+  }, [fetchMarks]);
+
+  // Toggle medication taken — save to server immediately
+  const toggle = useCallback(async (id: string) => {
+    const newTaken = !marcacoes[id];
+
+    // Optimistic update
+    setMarcacoes(prev => {
+      const updated = { ...prev, [id]: newTaken };
+      localStorage.setItem('marcacoes', JSON.stringify(updated));
+      return updated;
     });
-  }, []);
+
+    // Save to server
+    try {
+      if (newTaken) {
+        await fetch('/api/marks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markKey: id, taken: true }),
+        });
+      } else {
+        await fetch('/api/marks', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markKey: id }),
+        });
+      }
+    } catch {
+      // Will sync on next poll
+    }
+  }, [marcacoes]);
 
   // Check WhatsApp status periodically
   useEffect(() => {
@@ -103,7 +152,6 @@ export default function HomePage() {
         if (data.status === 'connected') {
           if (!cancelled) setWhatsappQR(null);
         } else if (data.status === 'connecting') {
-          // Try to get QR code
           try {
             const qrResponse = await fetch('/api/whatsapp-qr');
             const qrData = await qrResponse.json();
@@ -155,7 +203,7 @@ export default function HomePage() {
       if (isIOS) {
         alert(isStandalone
           ? '⚠️ Seu iPhone precisa do iOS 16.4+ para notificações push.\n\nVerifique em: Ajustes → Geral → Sobre → Versão'
-          : '📱 No iPhone, as notificações SÓ funcionam como app instalado!\n\n1. Toque no ícone de COMPARTILHAR (⬆️) na parte de BAIXO do Safari\n2. Toque em "Adicionar à Tela Inicial"\n3. FECHE o Safari e abra pelo ÍCONE na tela inicial\n4. Clique em "Ativar Notificações"\n\n⚠️ Requer iOS 16.4+');
+          : '📱 No iPhone, as notificações SÓ funcionam como app instalado!\n\n1. Toque no ícone de COMPARTILHAR (⬆️) na parte de BAIXO do Safari\n2. Toque em "Adicionar à Tela Início"\n3. FECHE o Safari e abra pelo ÍCONE na tela inicial\n4. Clique em "Ativar Notificações"\n\n⚠️ Requer iOS 16.4+');
       } else {
         alert('Seu navegador não suporta notificações push.\n\nTente usar o Google Chrome atualizado.');
       }
@@ -187,27 +235,35 @@ export default function HomePage() {
     setPushLoading(false);
   };
 
-  // Toggle medication taken
-  const toggle = useCallback((id: string) => {
-    setMarcacoes(prev => {
-      const updated = { ...prev, [id]: !prev[id] };
-      if (!prev[id]) {
-        fetch('/api/medication-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ medicationKey: id, takenAt: new Date().toISOString() }) }).catch(() => {});
+  // Clear cache and force update
+  const clearCache = async () => {
+    setClearingCache(true);
+    try {
+      // Unregister all service workers
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          await reg.unregister();
+        }
       }
-      return updated;
-    });
-  }, []);
 
-  const exportarJSON = () => {
-    const blob = new Blob([JSON.stringify(marcacoes, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'controle.json'; a.click();
-  };
+      // Clear all caches
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        for (const name of cacheNames) {
+          await caches.delete(name);
+        }
+      }
 
-  const importarJSON = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => { const result = e.target?.result; if (typeof result === 'string') setMarcacoes(JSON.parse(result)); };
-    reader.readAsText(file);
+      // Clear localStorage (marks will reload from server)
+      localStorage.removeItem('marcacoes');
+
+      alert('✅ Cache limpo! A página será recarregada.');
+      window.location.reload();
+    } catch {
+      alert('Erro ao limpar cache. Tente fechar e abrir o app novamente.');
+    }
+    setClearingCache(false);
   };
 
   const vibrar = () => { if (navigator.vibrate) navigator.vibrate([500, 300, 500]); };
@@ -309,10 +365,10 @@ export default function HomePage() {
 
   // Get urgency color based on time remaining
   const getUrgencyStyle = (diff: number) => {
-    if (diff <= 5 * 60 * 1000) return 'bg-red-700 shadow-[0_0_30px_rgba(255,0,0,0.6)] animate-pulse'; // <=5min: bright red pulse
-    if (diff <= 15 * 60 * 1000) return 'bg-red-600 shadow-[0_0_20px_rgba(255,0,0,0.4)]'; // <=15min: red
-    if (diff <= 30 * 60 * 1000) return 'bg-orange-600 shadow-[0_0_15px_rgba(255,165,0,0.3)]'; // <=30min: orange
-    return 'bg-red-900/80 shadow-[0_0_10px_rgba(255,0,0,0.2)]'; // <=1h: dark red
+    if (diff <= 5 * 60 * 1000) return 'bg-red-700 shadow-[0_0_30px_rgba(255,0,0,0.6)] animate-pulse';
+    if (diff <= 15 * 60 * 1000) return 'bg-red-600 shadow-[0_0_20px_rgba(255,0,0,0.4)]';
+    if (diff <= 30 * 60 * 1000) return 'bg-orange-600 shadow-[0_0_15px_rgba(255,165,0,0.3)]';
+    return 'bg-red-900/80 shadow-[0_0_10px_rgba(255,0,0,0.2)]';
   };
 
   const getUrgencyLabel = (diff: number) => {
@@ -339,14 +395,17 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#111827] text-white p-4 pb-24" style={{ fontFamily: 'Arial, sans-serif' }}>
       <h1 className="text-center text-2xl font-bold mb-4">Pós Operatório</h1>
 
+      {/* Sync indicator */}
+      <div className="text-center text-xs text-gray-500 mb-2">
+        {marcacoesLoaded ? '☁️ Sincronizado' : '⏳ Carregando dados...'}
+      </div>
+
       {/* Control Panel */}
       <div className="sticky top-0 bg-[#111827] pb-4 z-50">
         <div className="flex flex-wrap items-center gap-2 mb-3">
-          <button onClick={exportarJSON} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors">Exportar JSON</button>
-          <label className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-xl text-sm font-medium cursor-pointer transition-colors">
-            Importar JSON
-            <input type="file" accept=".json" className="hidden" onChange={importarJSON} />
-          </label>
+          <button onClick={clearCache} disabled={clearingCache} className="bg-orange-700 hover:bg-orange-600 text-white px-4 py-3 rounded-xl text-sm font-medium transition-colors">
+            {clearingCache ? '⏳ Limpando...' : '🗑️ Limpar Cache'}
+          </button>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-xl cursor-pointer">
@@ -520,7 +579,7 @@ export default function HomePage() {
                     </div>
                   </div>
                 </div>
-                {possuiPendentes ? <div className="mt-2 text-green-400 font-bold text-sm">Pendentes</div> : <div className="mt-2 text-green-400 font-bold text-sm">✅ Concluído</div>}
+                {possuiPendentes ? <div className="mt-2 text-yellow-400 font-bold text-sm">Pendentes</div> : <div className="mt-2 text-green-400 font-bold text-sm">✅ Concluído</div>}
               </div>
               {isAberto && (
                 <div className="p-4 bg-[#0f172a] max-h-[60vh] overflow-y-auto">
@@ -559,7 +618,7 @@ export default function HomePage() {
             <div>No iPhone, as notificações push SÓ funcionam como app instalado.</div>
             <div className="bg-blue-900/40 rounded-lg p-3 space-y-1">
               <div>1️⃣ Toque no ícone <strong>COMPARTILHAR</strong> (⬆️) na parte de BAIXO</div>
-              <div>2️⃣ Toque em <strong>&quot;Adicionar à Tela Inicial&quot;</strong></div>
+              <div>2️⃣ Toque em <strong>&quot;Adicionar à Tela Início&quot;</strong></div>
               <div>3️⃣ <strong>FECHE o Safari</strong> e abra pelo <strong>ícone na tela inicial</strong></div>
               <div>4️⃣ Clique em <strong>&quot;🔔 Ativar Notificações&quot;</strong></div>
             </div>
