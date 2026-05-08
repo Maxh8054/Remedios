@@ -68,6 +68,8 @@ export default function HomePage() {
   const [whatsappStatus, setWhatsappStatus] = useState<string>('checking');
   const [whatsappQR, setWhatsappQR] = useState<string | null>(null);
   const [showQR, setShowQR] = useState(false);
+  const [whatsappTestLoading, setWhatsappTestLoading] = useState(false);
+  const [whatsappTestResult, setWhatsappTestResult] = useState<string | null>(null);
   const ultimoAlertaRef = useRef('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -212,6 +214,24 @@ export default function HomePage() {
   const tocarSom = () => {
     if (!audioRef.current) audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
     audioRef.current.play().catch(() => {});
+  };
+
+  const testarWhatsApp = async () => {
+    setWhatsappTestLoading(true);
+    setWhatsappTestResult(null);
+    try {
+      const response = await fetch('/api/whatsapp-test', { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        setWhatsappTestResult('✅ Mensagem de teste enviada! Verifique os celulares.');
+      } else {
+        setWhatsappTestResult('❌ Falha: ' + (data.error || 'Erro desconhecido'));
+      }
+    } catch {
+      setWhatsappTestResult('❌ Erro de conexão com o servidor');
+    }
+    setWhatsappTestLoading(false);
+    setTimeout(() => setWhatsappTestResult(null), 10000);
   };
 
   // Update countdowns every second
@@ -369,6 +389,24 @@ export default function HomePage() {
                   <div className="text-gray-300">📱 +55 62 98120-6800</div>
                   <div className="text-gray-300">📱 +55 62 98209-3453</div>
                   <div className="text-gray-300">📱 +55 62 98306-8941</div>
+                </div>
+                <div className="mt-4 border-t border-gray-600 pt-3">
+                  <button
+                    onClick={testarWhatsApp}
+                    disabled={whatsappTestLoading}
+                    className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                      whatsappTestLoading
+                        ? 'bg-gray-600 text-gray-400 cursor-wait'
+                        : 'bg-green-600 hover:bg-green-500 text-white'
+                    }`}
+                  >
+                    {whatsappTestLoading ? '⏳ Enviando...' : '🧪 Enviar Teste WhatsApp'}
+                  </button>
+                  {whatsappTestResult && (
+                    <div className={`mt-2 text-sm font-medium ${whatsappTestResult.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
+                      {whatsappTestResult}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : whatsappStatus === 'unavailable' ? (
