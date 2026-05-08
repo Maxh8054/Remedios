@@ -26,14 +26,14 @@ webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 const TRATAMENTOS = [
   { nome: "Sinot Clav", freq: "12 em 12 horas", dias: 14, inicio: "2026-05-07", horarios: ["08:39", "20:39"] },
   { nome: "Prednisolona", freq: "1x ao dia", dias: 5, inicio: "2026-05-07", horarios: ["08:39"] },
-  { nome: "Traumeel", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-07", horarios: ["08:42", "16:42", "00:42"] },
+  { nome: "Traumeel", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-08", horarios: ["08:00", "16:00", "00:00"] },
   { nome: "Dipirona", freq: "6 em 6 horas se dor", dias: 30, inicio: "2026-05-07", horarios: ["00:00", "06:00", "12:00", "18:00"] },
-  { nome: "Bactroban", freq: "4x por dia", dias: 90, inicio: "2026-05-07", horarios: ["18:00", "00:00", "06:00", "12:00"] },
-  { nome: "Soro Fisiológico", freq: "6x por dia", dias: 30, inicio: "2026-05-07", horarios: ["18:00", "21:00", "00:00", "03:00", "06:00", "09:00"] },
-  { nome: "Nasoar", freq: "2x por dia", dias: 21, inicio: "2026-05-07", horarios: ["18:00", "06:00"] },
-  { nome: "Cloridrato de Nafazolina", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-07", horarios: ["18:00", "02:00", "10:00"] },
-  { nome: "Hirudoid", freq: "4 em 4 horas", dias: 30, inicio: "2026-05-07", horarios: ["18:00", "22:00", "02:00", "06:00"] },
-  { nome: "Gelo nos roxos", freq: "20 min de 2 em 2 horas", dias: 14, inicio: "2026-05-07", horarios: ["20:00", "22:00", "00:00"] },
+  { nome: "Bactroban", freq: "4x por dia", dias: 90, inicio: "2026-05-08", horarios: ["08:00", "14:00", "20:00", "02:00"] },
+  { nome: "Soro Fisiológico", freq: "6x por dia", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00", "00:00", "04:00"] },
+  { nome: "Nasoar", freq: "2x por dia", dias: 21, inicio: "2026-05-08", horarios: ["08:00", "20:00"] },
+  { nome: "Cloridrato de Nafazolina", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-08", horarios: ["08:00", "16:00", "00:00"] },
+  { nome: "Hirudoid", freq: "4 em 4 horas", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00"] },
+  { nome: "Gelo nos roxos", freq: "20 min de 2 em 2 horas", dias: 14, inicio: "2026-05-08", horarios: ["08:00", "10:00", "12:00"] },
   { nome: "Kelo-Cote UV Gel", freq: "2x ao dia", dias: 90, inicio: "2026-05-20", horarios: ["08:00", "20:00"] }
 ];
 
