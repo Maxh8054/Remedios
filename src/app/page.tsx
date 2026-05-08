@@ -65,6 +65,9 @@ export default function HomePage() {
   const [pushLoading, setPushLoading] = useState(false);
   const [swReady, setSwReady] = useState(false);
   const [swError, setSwError] = useState('');
+  const [whatsappStatus, setWhatsappStatus] = useState<string>('checking');
+  const [whatsappQR, setWhatsappQR] = useState<string | null>(null);
+  const [showQR, setShowQR] = useState(false);
   const ultimoAlertaRef = useRef('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -85,6 +88,33 @@ export default function HomePage() {
       localStorage.setItem('marcacoes', JSON.stringify(next));
       return next;
     });
+  }, []);
+
+  // Check WhatsApp status periodically
+  useEffect(() => {
+    let cancelled = false;
+    const checkWhatsapp = async () => {
+      try {
+        const response = await fetch('/api/whatsapp-status');
+        const data = await response.json();
+        if (!cancelled) setWhatsappStatus(data.status || 'offline');
+        if (data.status === 'connected') {
+          if (!cancelled) setWhatsappQR(null);
+        } else if (data.status === 'connecting') {
+          // Try to get QR code
+          try {
+            const qrResponse = await fetch('/api/whatsapp-qr');
+            const qrData = await qrResponse.json();
+            if (!cancelled && qrData.qr) setWhatsappQR(qrData.qr);
+          } catch { /* ignore */ }
+        }
+      } catch {
+        if (!cancelled) setWhatsappStatus('offline');
+      }
+    };
+    checkWhatsapp();
+    const interval = setInterval(checkWhatsapp, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   // Register Service Worker
@@ -306,6 +336,72 @@ export default function HomePage() {
         </div>
         {swError && !pushEnabled && <div className="mt-2 text-red-400 text-xs">⚠️ {swError}</div>}
         {!swReady && !swError && !pushEnabled && <div className="mt-2 text-yellow-400 text-xs animate-pulse">⏳ Preparando sistema de notificações...</div>}
+      </div>
+
+      {/* WhatsApp Connection Status */}
+      <div className="mb-5">
+        <button
+          onClick={() => setShowQR(!showQR)}
+          className={`w-full px-4 py-3 rounded-xl text-sm font-medium transition-colors flex items-center justify-between ${
+            whatsappStatus === 'connected' ? 'bg-green-800 hover:bg-green-700' :
+            whatsappStatus === 'connecting' ? 'bg-yellow-800 hover:bg-yellow-700' :
+            whatsappStatus === 'checking' ? 'bg-gray-700 hover:bg-gray-600' :
+            'bg-red-800 hover:bg-red-700'
+          }`}
+        >
+          <span>
+            {whatsappStatus === 'connected' ? '📱 WhatsApp Conectado' :
+             whatsappStatus === 'connecting' ? '⏳ WhatsApp Conectando...' :
+             whatsappStatus === 'checking' ? '🔄 Verificando WhatsApp...' :
+             '📵 WhatsApp Desconectado'}
+          </span>
+          <span className="text-lg">{showQR ? '▲' : '▼'}</span>
+        </button>
+        {showQR && (
+          <div className="bg-[#1f2937] rounded-b-xl p-4 mt-0">
+            {whatsappStatus === 'connected' ? (
+              <div className="text-center">
+                <div className="text-green-400 text-lg font-bold mb-2">✅ WhatsApp Ativo!</div>
+                <div className="text-sm text-gray-400">Mensagens serão enviadas automaticamente para:</div>
+                <div className="mt-2 space-y-1 text-sm">
+                  <div className="text-gray-300">📱 +55 62 98120-6800</div>
+                  <div className="text-gray-300">📱 +55 62 98209-3453</div>
+                  <div className="text-gray-300">📱 +55 62 98306-8941</div>
+                </div>
+              </div>
+            ) : whatsappQR ? (
+              <div className="text-center">
+                <div className="text-yellow-400 font-bold mb-3">📱 Escaneie o QR Code com o WhatsApp</div>
+                <div className="bg-white p-3 rounded-xl inline-block mb-3">
+                  <canvas
+                    ref={(canvas) => {
+                      if (canvas && whatsappQR) {
+                        import('qrcode').then((QRCode) => {
+                          QRCode.toCanvas(canvas, whatsappQR, {
+                            width: 280,
+                            margin: 2,
+                            color: { dark: '#000000', light: '#ffffff' },
+                          });
+                        }).catch(() => {});
+                      }
+                    }}
+                  />
+                </div>
+                <div className="text-xs text-gray-400 space-y-1">
+                  <div>1. Abra o <strong>WhatsApp</strong> no celular</div>
+                  <div>2. Vá em <strong>Ajustes → Aparelhos conectados</strong></div>
+                  <div>3. Toque em <strong>Conectar um aparelho</strong></div>
+                  <div>4. Escaneie o QR code acima</div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center text-gray-400">
+                <div className="animate-pulse mb-2">⏳ Aguardando QR Code...</div>
+                <div className="text-xs">Certifique-se de que o serviço WhatsApp está rodando.</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* NEXT Medication Card - main one */}

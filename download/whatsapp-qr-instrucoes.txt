@@ -1,0 +1,17 @@
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Show QR code for WhatsApp pairing and ensure all features work
+
+Work Log:
+- Rewrote WhatsApp service to use Node.js native http server (stable, was crashing with Bun)
+- Added QR data saving to public/whatsapp-qr-data.txt when QR is generated
+- Created /api/whatsapp-qr and /api/whatsapp-status API routes
+- Added WhatsApp status + QR display section to page.tsx frontend
+- Generated whatsapp-qr.png at /home/z/my-project/download/
+
+Stage Summary:
+- WhatsApp service runs stably on port 3040 with Node.js tsx
+- QR code displayed on web page with live status
+- QR image also available at /home/z/my-project/download/whatsapp-qr.png

@@ -4,20 +4,28 @@ import {
   DisconnectReason,
   fetchLatestBaileysVersion,
   type WASocket,
-  type BufferJSON,
   type ConnectionState,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
-import { readdir, writeFile, readFile, mkdir } from "fs/promises";
-import { join } from "path";
+import { mkdir, writeFile } from "fs/promises";
+import { join, dirname } from "path";
+import { createServer } from "http";
+import { fileURLToPath } from "url";
+
+// ---------------------------------------------------------------------------
+// ESM __dirname shim
+// ---------------------------------------------------------------------------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 const PORT = 3040;
-const AUTH_FOLDER = join(import.meta.dir, "auth");
+const AUTH_FOLDER = join(__dirname, "auth");
+const QR_DATA_PATH = join(__dirname, "..", "..", "public", "whatsapp-qr-data.txt");
 
 const DEFAULT_PHONES = [
   "5562981206800",
@@ -47,6 +55,18 @@ function phoneToJID(phone: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// JSON response helper
+// ---------------------------------------------------------------------------
+function jsonResponse(data: unknown, statusCode = 200) {
+  const body = JSON.stringify(data);
+  return {
+    statusCode,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    body,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // WhatsApp connection wrapper
 // ---------------------------------------------------------------------------
 async function connectWhatsApp(): Promise<void> {
@@ -57,7 +77,6 @@ async function connectWhatsApp(): Promise<void> {
     // Ensure auth folder exists
     await mkdir(AUTH_FOLDER, { recursive: true });
 
-    // eslint-disable-next-line react-hooks/rules-of-hooks
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
     sock = makeWASocket({
@@ -65,7 +84,7 @@ async function connectWhatsApp(): Promise<void> {
       auth: state,
       logger,
       printQRInTerminal: true,
-      browser: ["whatsapp-service", "Chrome", "1.0.0"],
+      browser: ["pos-operatorio", "Chrome", "1.0.0"],
     });
 
     connectionStatus = "connecting";
@@ -79,10 +98,17 @@ async function connectWhatsApp(): Promise<void> {
 
       if (qr) {
         lastQR = qr;
+        console.log("\n📱 Novo QR code gerado! Escaneie com o WhatsApp:\n");
         qrcode.generate(qr, { small: true }, (qrStr: string) => {
-          console.log("\n📱 Scan this QR code with WhatsApp:\n");
           console.log(qrStr);
         });
+        // Save QR data to file for the web app to generate image
+        try {
+          await writeFile(QR_DATA_PATH, qr, "utf-8");
+          console.log("📸 QR data saved to public/whatsapp-qr-data.txt");
+        } catch (err) {
+          console.error("Failed to save QR data:", err);
+        }
       }
 
       if (connection === "close") {
@@ -93,32 +119,31 @@ async function connectWhatsApp(): Promise<void> {
           reconnectAttempts < MAX_RECONNECT_ATTEMPTS;
 
         console.log(
-          `❌ Connection closed. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`
+          `❌ Conexão fechada. Status: ${statusCode}. Reconectando: ${shouldReconnect}`
         );
 
         if (shouldReconnect) {
           reconnectAttempts++;
           const delay = Math.min(reconnectAttempts * 2000, 30000);
-          console.log(`⏳ Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts})...`);
+          console.log(`⏳ Reconectando em ${delay / 1000}s (tentativa ${reconnectAttempts})...`);
           setTimeout(() => connectWhatsApp(), delay);
         } else {
-          console.log("🚫 Max reconnect attempts reached or logged out. Manual restart required.");
+          console.log("🚫 Máximo de tentativas atingido ou desconectado. Reinicie manualmente.");
           lastQR = null;
         }
       } else if (connection === "open") {
         connectionStatus = "connected";
         reconnectAttempts = 0;
         lastQR = null;
-        console.log("✅ WhatsApp connected successfully!");
+        console.log("✅ WhatsApp conectado com sucesso!");
       } else if (connection === "connecting") {
         connectionStatus = "connecting";
-        console.log("🔄 Connecting to WhatsApp...");
+        console.log("🔄 Conectando ao WhatsApp...");
       }
     });
 
-    sock.ev.on("messages.upsert", (msg) => {
-      // We don't process incoming messages in this service
-      // but you could add handling here
+    sock.ev.on("messages.upsert", () => {
+      // We don't process incoming messages
     });
   } catch (error) {
     console.error("Failed to connect:", error);
@@ -161,144 +186,142 @@ async function sendBatchMessage(phones: string[], message: string) {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP Server (Bun native)
+// HTTP Server (Node.js native)
 // ---------------------------------------------------------------------------
-const server = Bun.serve({
-  port: PORT,
-  async fetch(req) {
-    const url = new URL(req.url);
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url || "/", `http://localhost:${PORT}`);
 
-    // ---- POST /send ----
-    if (url.pathname === "/send" && req.method === "POST") {
-      try {
-        const body = (await req.json()) as { phone?: string; message?: string };
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    res.writeHead(200, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    res.end();
+    return;
+  }
 
-        if (!body.phone || !body.message) {
-          return Response.json(
-            { error: "Missing required fields: phone, message" },
-            { status: 400 }
-          );
-        }
+  // Helper to read request body
+  const readBody = (): Promise<string> =>
+    new Promise((resolve) => {
+      let data = "";
+      req.on("data", (chunk) => { data += chunk; });
+      req.on("end", () => resolve(data));
+    });
 
-        const result = await sendMessage(body.phone, body.message);
-        return Response.json({ success: true, data: result });
-      } catch (err: any) {
-        return Response.json(
-          { success: false, error: err.message },
-          { status: 500 }
-        );
-      }
-    }
-
-    // ---- POST /send-batch ----
-    if (url.pathname === "/send-batch" && req.method === "POST") {
-      try {
-        const body = (await req.json()) as {
-          phones?: string[];
-          message?: string;
-        };
-
-        if (!body.phones || !Array.isArray(body.phones) || body.phones.length === 0) {
-          return Response.json(
-            { error: "Missing or invalid required field: phones (string[])" },
-            { status: 400 }
-          );
-        }
-
-        if (!body.message) {
-          return Response.json(
-            { error: "Missing required field: message" },
-            { status: 400 }
-          );
-        }
-
-        const result = await sendBatchMessage(body.phones, body.message);
-        return Response.json({ success: true, data: result });
-      } catch (err: any) {
-        return Response.json(
-          { success: false, error: err.message },
-          { status: 500 }
-        );
-      }
-    }
-
+  try {
     // ---- GET /status ----
     if (url.pathname === "/status" && req.method === "GET") {
-      return Response.json({
+      const resp = jsonResponse({
         status: connectionStatus,
         reconnectAttempts,
         defaultPhones: DEFAULT_PHONES,
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
       });
+      res.writeHead(resp.statusCode, resp.headers);
+      res.end(resp.body);
+      return;
     }
 
     // ---- GET /qr ----
     if (url.pathname === "/qr" && req.method === "GET") {
       if (connectionStatus === "connected") {
-        return Response.json({
-          connected: true,
-          message: "Already connected. No QR code needed.",
-        });
+        const resp = jsonResponse({ connected: true, message: "Already connected. No QR code needed." });
+        res.writeHead(resp.statusCode, resp.headers);
+        res.end(resp.body);
+        return;
       }
 
       if (!lastQR) {
-        return Response.json(
-          {
-            connected: false,
-            qr: null,
-            message: "QR code not yet available. Wait a moment and try again.",
-          },
-          { status: 503 }
+        const resp = jsonResponse(
+          { connected: false, qr: null, message: "QR code not yet available. Wait a moment and try again." },
+          503
         );
+        res.writeHead(resp.statusCode, resp.headers);
+        res.end(resp.body);
+        return;
       }
 
-      return Response.json({
+      const resp = jsonResponse({
         connected: false,
         qr: lastQR,
         message: "Scan this QR code with WhatsApp to connect.",
       });
+      res.writeHead(resp.statusCode, resp.headers);
+      res.end(resp.body);
+      return;
     }
 
     // ---- GET /health ----
     if (url.pathname === "/health" && req.method === "GET") {
       const healthy = connectionStatus === "connected";
-      return Response.json(
-        {
-          healthy,
-          status: connectionStatus,
-          service: "whatsapp-service",
-          port: PORT,
-          timestamp: new Date().toISOString(),
-        },
-        { status: healthy ? 200 : 503 }
+      const resp = jsonResponse(
+        { healthy, status: connectionStatus, service: "whatsapp-service", port: PORT, timestamp: new Date().toISOString() },
+        healthy ? 200 : 503
       );
+      res.writeHead(resp.statusCode, resp.headers);
+      res.end(resp.body);
+      return;
+    }
+
+    // ---- POST /send ----
+    if (url.pathname === "/send" && req.method === "POST") {
+      const body = JSON.parse(await readBody()) as { phone?: string; message?: string };
+      if (!body.phone || !body.message) {
+        const resp = jsonResponse({ error: "Missing required fields: phone, message" }, 400);
+        res.writeHead(resp.statusCode, resp.headers);
+        res.end(resp.body);
+        return;
+      }
+      const result = await sendMessage(body.phone, body.message);
+      const resp = jsonResponse({ success: true, data: result });
+      res.writeHead(resp.statusCode, resp.headers);
+      res.end(resp.body);
+      return;
+    }
+
+    // ---- POST /send-batch ----
+    if (url.pathname === "/send-batch" && req.method === "POST") {
+      const body = JSON.parse(await readBody()) as { phones?: string[]; message?: string };
+      if (!body.phones || !Array.isArray(body.phones) || body.phones.length === 0) {
+        const resp = jsonResponse({ error: "Missing or invalid field: phones (string[])" }, 400);
+        res.writeHead(resp.statusCode, resp.headers);
+        res.end(resp.body);
+        return;
+      }
+      if (!body.message) {
+        const resp = jsonResponse({ error: "Missing required field: message" }, 400);
+        res.writeHead(resp.statusCode, resp.headers);
+        res.end(resp.body);
+        return;
+      }
+      const result = await sendBatchMessage(body.phones, body.message);
+      const resp = jsonResponse({ success: true, data: result });
+      res.writeHead(resp.statusCode, resp.headers);
+      res.end(resp.body);
+      return;
     }
 
     // ---- POST /send-defaults ----
     if (url.pathname === "/send-defaults" && req.method === "POST") {
-      try {
-        const body = (await req.json()) as { message?: string };
-
-        if (!body.message) {
-          return Response.json(
-            { error: "Missing required field: message" },
-            { status: 400 }
-          );
-        }
-
-        const result = await sendBatchMessage(DEFAULT_PHONES, body.message);
-        return Response.json({ success: true, data: result });
-      } catch (err: any) {
-        return Response.json(
-          { success: false, error: err.message },
-          { status: 500 }
-        );
+      const body = JSON.parse(await readBody()) as { message?: string };
+      if (!body.message) {
+        const resp = jsonResponse({ error: "Missing required field: message" }, 400);
+        res.writeHead(resp.statusCode, resp.headers);
+        res.end(resp.body);
+        return;
       }
+      const result = await sendBatchMessage(DEFAULT_PHONES, body.message);
+      const resp = jsonResponse({ success: true, data: result });
+      res.writeHead(resp.statusCode, resp.headers);
+      res.end(resp.body);
+      return;
     }
 
     // ---- 404 fallback ----
-    return Response.json(
+    const resp = jsonResponse(
       {
         error: "Not found",
         endpoints: [
@@ -310,24 +333,42 @@ const server = Bun.serve({
           "GET  /health         - Health check endpoint",
         ],
       },
-      { status: 404 }
+      404
     );
-  },
+    res.writeHead(resp.statusCode, resp.headers);
+    res.end(resp.body);
+  } catch (err: any) {
+    const resp = jsonResponse({ success: false, error: err.message }, 500);
+    res.writeHead(resp.statusCode, resp.headers);
+    res.end(resp.body);
+  }
 });
 
 // ---------------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------------
-console.log(`\n🚀 WhatsApp Service running on port ${PORT}`);
-console.log(`📋 Endpoints:`);
-console.log(`   POST /send           - Send message to a phone number`);
-console.log(`   POST /send-batch     - Send message to multiple numbers`);
-console.log(`   POST /send-defaults  - Send message to default phone numbers`);
-console.log(`   GET  /status         - Get connection status`);
-console.log(`   GET  /qr             - Get QR code for pairing`);
-console.log(`   GET  /health         - Health check`);
-console.log(`\n📞 Default phones: ${DEFAULT_PHONES.join(", ")}`);
-console.log(`📁 Auth folder: ${AUTH_FOLDER}\n`);
+server.listen(PORT, () => {
+  console.log(`\n🚀 WhatsApp Service rodando na porta ${PORT}`);
+  console.log(`📋 Endpoints:`);
+  console.log(`   POST /send           - Enviar mensagem para um número`);
+  console.log(`   POST /send-batch     - Enviar para múltiplos números`);
+  console.log(`   POST /send-defaults  - Enviar para números padrão`);
+  console.log(`   GET  /status         - Status da conexão`);
+  console.log(`   GET  /qr             - QR code para pareamento`);
+  console.log(`   GET  /health         - Health check`);
+  console.log(`\n📞 Números padrão: ${DEFAULT_PHONES.join(", ")}`);
+  console.log(`📁 Auth folder: ${AUTH_FOLDER}\n`);
 
-// Start WhatsApp connection
-connectWhatsApp();
+  connectWhatsApp();
+});
+
+process.on("SIGINT", () => {
+  console.log("\n🛑 Encerrando WhatsApp Service...");
+  server.close();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  server.close();
+  process.exit(0);
+});
