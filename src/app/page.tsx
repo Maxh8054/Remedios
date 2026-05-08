@@ -18,12 +18,12 @@ const TRATAMENTOS: Tratamento[] = [
   { nome: "Prednisolona", freq: "1x ao dia", dias: 5, inicio: "2026-05-07", horarios: ["08:39"] },
   { nome: "Traumeel", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-08", horarios: ["08:00", "16:00", "00:00"] },
   { nome: "Dipirona", freq: "6 em 6 horas se dor", dias: 30, inicio: "2026-05-07", horarios: ["00:00", "06:00", "12:00", "18:00"] },
-  { nome: "Bactroban", freq: "4x por dia", dias: 90, inicio: "2026-05-08", horarios: ["08:00", "14:00", "20:00", "02:00"] },
-  { nome: "Soro Fisiológico", freq: "6x por dia", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00", "00:00", "04:00"] },
+  { nome: "Bactroban", freq: "3x por dia", dias: 90, inicio: "2026-05-08", horarios: ["08:00", "14:00", "20:00"] },
+  { nome: "Soro Fisiológico", freq: "5x por dia", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00", "00:00"] },
   { nome: "Nasoar", freq: "2x por dia", dias: 21, inicio: "2026-05-08", horarios: ["08:00", "20:00"] },
   { nome: "Cloridrato de Nafazolina", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-08", horarios: ["08:00", "16:00", "00:00"] },
   { nome: "Hirudoid", freq: "4 em 4 horas", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00"] },
-  { nome: "Gelo nos roxos", freq: "20 min de 2 em 2 horas", dias: 14, inicio: "2026-05-08", horarios: ["08:00", "10:00", "12:00"] },
+  { nome: "Gelo nos roxos", freq: "20 min de 2 em 2 horas", dias: 14, inicio: "2026-05-08", horarios: ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "00:00"] },
   { nome: "Kelo-Cote UV Gel", freq: "2x ao dia", dias: 90, inicio: "2026-05-20", horarios: ["08:00", "20:00"] }
 ];
 
@@ -252,13 +252,16 @@ export default function HomePage() {
             const id = `${index}_${d}_${h}`;
             const diff = data.getTime() - agora.getTime();
 
+            // Skip if already taken
+            if (marcacoes[id]) continue;
+
             // Find the very next one
-            if (diff > 0 && !marcacoes[id]) {
+            if (diff > 0) {
               if (!proximo || data < proximo) { proximo = data; nomeProximo = t.nome; }
             }
 
-            // All medications within 1 hour (3600000ms) that are NOT taken
-            if (diff > 0 && diff <= 3600000 && !marcacoes[id]) {
+            // All medications within 1 hour (3600000ms) and NOT yet passed by more than 5 min
+            if (diff > -5 * 60 * 1000 && diff <= 3600000) {
               upcoming.push({ nome: t.nome, freq: t.freq, horario, diff, id });
             }
           }

@@ -43,7 +43,7 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 50;
 
 const logger = pino({
-  level: "silent", // set to "info" for debugging
+  level: "warn", // set to "info" for more debugging
 });
 
 // ---------------------------------------------------------------------------
@@ -165,7 +165,22 @@ async function sendMessage(phone: string, message: string) {
   }
 
   const jid = phoneToJID(phone);
+  console.log(`[WA] Sending to ${phone} (JID: ${jid})...`);
+
+  // Verify number is registered on WhatsApp
+  try {
+    const [result] = await sock.onWhatsApp(jid);
+    if (!result || !result.exists) {
+      console.log(`[WA] ⚠️ Number ${phone} is NOT registered on WhatsApp. Trying anyway...`);
+    } else {
+      console.log(`[WA] ✅ Number ${phone} is registered. JID: ${result.jid}`);
+    }
+  } catch (e) {
+    console.log(`[WA] Could not verify number ${phone}:`, e);
+  }
+
   const sent = await sock.sendMessage(jid, { text: message });
+  console.log(`[WA] ✅ Message sent to ${phone}, ID: ${sent.key.id}`);
   return { phone, jid, messageId: sent.key.id, timestamp: sent.messageTimestamp };
 }
 

@@ -31,21 +31,26 @@ const TRATAMENTOS = [
   { nome: "Prednisolona", freq: "1x ao dia", dias: 5, inicio: "2026-05-07", horarios: ["08:39"] },
   { nome: "Traumeel", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-08", horarios: ["08:00", "16:00", "00:00"] },
   { nome: "Dipirona", freq: "6 em 6 horas se dor", dias: 30, inicio: "2026-05-07", horarios: ["00:00", "06:00", "12:00", "18:00"] },
-  { nome: "Bactroban", freq: "4x por dia", dias: 90, inicio: "2026-05-08", horarios: ["08:00", "14:00", "20:00", "02:00"] },
-  { nome: "Soro Fisiológico", freq: "6x por dia", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00", "00:00", "04:00"] },
+  { nome: "Bactroban", freq: "3x por dia", dias: 90, inicio: "2026-05-08", horarios: ["08:00", "14:00", "20:00"] },
+  { nome: "Soro Fisiológico", freq: "5x por dia", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00", "00:00"] },
   { nome: "Nasoar", freq: "2x por dia", dias: 21, inicio: "2026-05-08", horarios: ["08:00", "20:00"] },
   { nome: "Cloridrato de Nafazolina", freq: "8 em 8 horas", dias: 7, inicio: "2026-05-08", horarios: ["08:00", "16:00", "00:00"] },
   { nome: "Hirudoid", freq: "4 em 4 horas", dias: 30, inicio: "2026-05-08", horarios: ["08:00", "12:00", "16:00", "20:00"] },
-  { nome: "Gelo nos roxos", freq: "20 min de 2 em 2 horas", dias: 14, inicio: "2026-05-08", horarios: ["08:00", "10:00", "12:00"] },
+  { nome: "Gelo nos roxos", freq: "20 min de 2 em 2 horas", dias: 14, inicio: "2026-05-08", horarios: ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "00:00"] },
   { nome: "Kelo-Cote UV Gel", freq: "2x ao dia", dias: 90, inicio: "2026-05-20", horarios: ["08:00", "20:00"] }
 ];
+
+// ---------------------------------------------------------------------------
+// Notification schedule: at these times BEFORE the scheduled time
+// ---------------------------------------------------------------------------
+const ALERT_MINUTES_BEFORE = [60, 30, 15, 5]; // 1h, 30min, 15min, 5min before + exact time
 
 // ---------------------------------------------------------------------------
 // In-memory deduplication (resets on cold start — acceptable trade-off)
 // ---------------------------------------------------------------------------
 const sentNotifications = new Set<string>();
 
-// Clean old entries every hour (runs in background)
+// Clean old entries every hour
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
@@ -120,7 +125,7 @@ async function sendWhatsApp(message: string) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phones: WHATSAPP_NUMBERS, message }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
     return response.ok;
   } catch {
@@ -150,70 +155,85 @@ async function checkAndNotify() {
 
         const diff = scheduledTime.getTime() - now.getTime();
 
-        // Exact time notification (±30 seconds)
+        // ---- EXACT TIME notification (±30 seconds) ----
         if (diff >= -30000 && diff <= 30000) {
-          const notifKey = `${t.nome}_${d}_${h}_${Math.floor(now.getTime() / 60000)}`;
-          if (sentNotifications.has(notifKey)) continue;
-          sentNotifications.add(notifKey);
+          const notifKey = `exact_${t.nome}_${d}_${h}_${Math.floor(now.getTime() / 60000)}`;
+          if (!sentNotifications.has(notifKey)) {
+            sentNotifications.add(notifKey);
 
-          const logKey = `${TRATAMENTOS.indexOf(t)}_${d}_${h}`;
+            const logKey = `${TRATAMENTOS.indexOf(t)}_${d}_${h}`;
 
-          const payload = {
-            title: `💊 Hora de ${t.nome}!`,
-            body: `${t.nome} - ${t.freq}\nHorário: ${horario} (Dia ${d + 1})`,
-            icon: '/icon-192.png', badge: '/icon-192.png',
-            medicationKey: logKey, timeKey: horario,
-            requireInteraction: true,
-            vibrate: [500, 300, 500, 300, 500, 300, 500],
-            renotify: true, url: '/'
-          };
+            const payload = {
+              title: `💊 Hora de ${t.nome}!`,
+              body: `${t.nome} - ${t.freq}\nHorário: ${horario} (Dia ${d + 1})`,
+              icon: '/icon-192.png', badge: '/icon-192.png',
+              medicationKey: logKey, timeKey: horario,
+              requireInteraction: true,
+              vibrate: [500, 300, 500, 300, 500, 300, 500],
+              renotify: true, url: '/'
+            };
 
-          for (const sub of subscriptions) {
-            await sendPushNotification(sub, payload);
+            for (const sub of subscriptions) {
+              await sendPushNotification(sub, payload);
+            }
+            notificationsSent++;
+
+            // WhatsApp message at exact time
+            const whatsappMsg = `💊 *PÓS-OPERATÓRIO - HORA DO MEDICAMENTO*\n\n` +
+              `*${t.nome}*\n` +
+              `Frequência: ${t.freq}\n` +
+              `Horário: ${horario}\n` +
+              `Dia: ${d + 1}\n\n` +
+              `⚠️ Não esqueça de tomar!`;
+            const waOk = await sendWhatsApp(whatsappMsg);
+            if (waOk) whatsappSent++;
           }
-          notificationsSent++;
-
-          // WhatsApp message
-          const whatsappMsg = `💊 *PÓS-OPERATÓRIO - HORA DO MEDICAMENTO*\n\n` +
-            `*${t.nome}*\n` +
-            `Frequência: ${t.freq}\n` +
-            `Horário: ${horario}\n` +
-            `Dia: ${d + 1}\n\n` +
-            `⚠️ Não esqueça de tomar!`;
-          const waOk = await sendWhatsApp(whatsappMsg);
-          if (waOk) whatsappSent++;
         }
 
-        // Early warning 5 minutes before
-        const fiveMinBefore = scheduledTime.getTime() - 5 * 60 * 1000;
-        const diffEarly = fiveMinBefore - now.getTime();
-        if (diffEarly >= -30000 && diffEarly <= 30000) {
-          const notifKey = `early_${t.nome}_${d}_${h}_${Math.floor(now.getTime() / 60000)}`;
-          if (sentNotifications.has(notifKey)) continue;
-          sentNotifications.add(notifKey);
+        // ---- EARLY WARNING notifications (1h, 30min, 15min, 5min before) ----
+        for (const minutesBefore of ALERT_MINUTES_BEFORE) {
+          const alertTime = scheduledTime.getTime() - minutesBefore * 60 * 1000;
+          const diffAlert = alertTime - now.getTime();
 
-          const logKey = `${TRATAMENTOS.indexOf(t)}_${d}_${h}`;
-          const payload = {
-            title: `⏰ Em 5 minutos: ${t.nome}`,
-            body: `${t.nome} - ${t.freq}\nHorário: ${horario} (Dia ${d + 1})`,
-            icon: '/icon-192.png', badge: '/icon-192.png',
-            medicationKey: logKey, timeKey: horario,
-            requireInteraction: false,
-            vibrate: [200, 100, 200], renotify: true, url: '/'
-          };
+          if (diffAlert >= -30000 && diffAlert <= 30000) {
+            const notifKey = `early${minutesBefore}_${t.nome}_${d}_${h}_${Math.floor(now.getTime() / 60000)}`;
+            if (sentNotifications.has(notifKey)) continue;
+            sentNotifications.add(notifKey);
 
-          for (const sub of subscriptions) {
-            await sendPushNotification(sub, payload);
+            const logKey = `${TRATAMENTOS.indexOf(t)}_${d}_${h}`;
+
+            let label = '';
+            if (minutesBefore === 60) label = '1 hora';
+            else if (minutesBefore === 30) label = '30 minutos';
+            else if (minutesBefore === 15) label = '15 minutos';
+            else if (minutesBefore === 5) label = '5 minutos';
+
+            const payload = {
+              title: `⏰ Em ${label}: ${t.nome}`,
+              body: `${t.nome} - ${t.freq}\nHorário: ${horario} (Dia ${d + 1})`,
+              icon: '/icon-192.png', badge: '/icon-192.png',
+              medicationKey: logKey, timeKey: horario,
+              requireInteraction: minutesBefore <= 15,
+              vibrate: minutesBefore <= 5 ? [500, 300, 500, 300, 500] : [200, 100, 200],
+              renotify: true, url: '/'
+            };
+
+            for (const sub of subscriptions) {
+              await sendPushNotification(sub, payload);
+            }
+            notificationsSent++;
+
+            // WhatsApp only at 5min and exact time (not at 1h, 30min, 15min)
+            if (minutesBefore === 5) {
+              const whatsappMsg = `⏰ *AVISO - 5 MINUTOS*\n\n` +
+                `Em 5 minutos é hora de tomar:\n` +
+                `*${t.nome}*\n` +
+                `Horário: ${horario}\n` +
+                `Dia: ${d + 1}`;
+              const waOk = await sendWhatsApp(whatsappMsg);
+              if (waOk) whatsappSent++;
+            }
           }
-          notificationsSent++;
-
-          const whatsappMsg = `⏰ *AVISO - 5 MINUTOS*\n\n` +
-            `Em 5 minutos é hora de tomar:\n` +
-            `*${t.nome}*\n` +
-            `Horário: ${horario}\n` +
-            `Dia: ${d + 1}`;
-          const waOk = await sendWhatsApp(whatsappMsg);
-          if (waOk) whatsappSent++;
         }
       }
     }
