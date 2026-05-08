@@ -64,9 +64,9 @@ services:
     plan: starter
     dockerContext: mini-services/whatsapp-service
     dockerfilePath: mini-services/whatsapp-service/Dockerfile
-    disks:
-      - name: whatsapp-auth
-        mountPath: /app/auth
+    disk:
+      name: whatsapp-auth
+      mountPath: /app/auth
     envVars:
       - key: PORT
         value: "10000"
