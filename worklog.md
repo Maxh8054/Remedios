@@ -23,3 +23,21 @@ Stage Summary:
 - Notification mini-service runs on port 3030, checks medications every 30 seconds
 - Users can enable push notifications and add the app to their home screen
 - Notifications appear on lock screen with sound and vibration
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix deployment build error - VAPID keys causing build crash
+
+Work Log:
+- Diagnosed build error: `webpush.setVapidDetails()` was called at module-level in `/api/subscribe/route.ts` with empty VAPID key defaults, crashing the Next.js build during static page data collection
+- Added VAPID keys to `.env` file (previously only had DATABASE_URL)
+- Refactored subscribe route to use lazy initialization pattern (`ensureVapidInit()`) instead of top-level `webpush.setVapidDetails()`
+- Verified all API endpoints work: `/api/vapid-public-key`, `/api/subscribe`, `/api/medication-log`
+- Confirmed production build succeeds with `bun run build`
+- Confirmed medication schedules are already updated with 8:00 AM start times
+
+Stage Summary:
+- Build error fixed by lazy-initializing web-push VAPID details
+- VAPID keys added to `.env`: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
+- All 11 medications confirmed with correct schedules (Traumeel, Bactroban, Soro Fisiológico, Nasoar, Nafazolina, Hirudoid, Gelo nos roxos all start at 08:00)
+- Production build passes successfully

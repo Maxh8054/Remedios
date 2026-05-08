@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import webpush from 'web-push';
 
-// Configure web-push with VAPID details
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || 'mailto:pos-operatorio@app.com',
-  process.env.VAPID_PUBLIC_KEY || '',
-  process.env.VAPID_PRIVATE_KEY || ''
-);
+// Lazy initialization of web-push VAPID details
+// This avoids build-time errors when env vars are not available
+let vapidInitialized = false;
+
+function ensureVapidInit() {
+  if (vapidInitialized) return;
+  const publicKey = process.env.VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT || 'mailto:pos-operatorio@app.com';
+
+  if (publicKey && privateKey) {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+  }
+  vapidInitialized = true;
+}
 
 // GET - List all subscriptions (used by notification service)
 export async function GET() {
@@ -71,6 +80,7 @@ export async function POST(request: NextRequest) {
 // DELETE - Remove a push subscription
 export async function DELETE(request: NextRequest) {
   try {
+    ensureVapidInit();
     const body = await request.json();
     const { endpoint } = body;
 
