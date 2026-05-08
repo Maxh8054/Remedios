@@ -1,0 +1,12 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "installCommand": "bun install",
+  "regions": ["gru1"],
+  "env": {
+    "VAPID_PUBLIC_KEY": "",
+    "VAPID_PRIVATE_KEY": "",
+    "VAPID_SUBJECT": "",
+    "DATABASE_URL": ""
+  }
+}

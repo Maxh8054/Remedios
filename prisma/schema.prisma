@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
 }
 
 datasource db {
@@ -8,16 +8,16 @@ datasource db {
 }
 
 model PushSubscription {
-  id          String @id @default(cuid())
-  endpoint    String @unique
-  p256dh      String
-  auth        String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model MedicationLog {
-  id          String @id @default(cuid())
+  id            String   @id @default(cuid())
   medicationKey String
-  takenAt     DateTime @default(now())
+  takenAt       DateTime @default(now())
 }
