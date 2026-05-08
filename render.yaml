@@ -1,7 +1,7 @@
 databases:
   # ── PostgreSQL Database ──────────────────────────────────────────────
   - name: pos-operatorio-db
-    plan: starter
+    plan: basic
     region: oregon
 
 services:
