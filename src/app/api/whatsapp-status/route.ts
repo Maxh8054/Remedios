@@ -8,9 +8,10 @@ export async function GET() {
     const data = await response.json();
     return NextResponse.json(data);
   } catch {
+    // When WhatsApp service is not available (e.g., on Vercel)
     return NextResponse.json({
-      status: 'offline',
-      message: 'WhatsApp service is not running',
-    }, { status: 503 });
+      status: 'unavailable',
+      message: 'WhatsApp service is not running. Push notifications will still work.',
+    });
   }
 }

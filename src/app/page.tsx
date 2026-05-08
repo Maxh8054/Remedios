@@ -346,6 +346,7 @@ export default function HomePage() {
             whatsappStatus === 'connected' ? 'bg-green-800 hover:bg-green-700' :
             whatsappStatus === 'connecting' ? 'bg-yellow-800 hover:bg-yellow-700' :
             whatsappStatus === 'checking' ? 'bg-gray-700 hover:bg-gray-600' :
+            whatsappStatus === 'unavailable' ? 'bg-gray-700 hover:bg-gray-600' :
             'bg-red-800 hover:bg-red-700'
           }`}
         >
@@ -353,6 +354,7 @@ export default function HomePage() {
             {whatsappStatus === 'connected' ? '📱 WhatsApp Conectado' :
              whatsappStatus === 'connecting' ? '⏳ WhatsApp Conectando...' :
              whatsappStatus === 'checking' ? '🔄 Verificando WhatsApp...' :
+             whatsappStatus === 'unavailable' ? '📵 WhatsApp Indisponível' :
              '📵 WhatsApp Desconectado'}
           </span>
           <span className="text-lg">{showQR ? '▲' : '▼'}</span>
@@ -368,6 +370,11 @@ export default function HomePage() {
                   <div className="text-gray-300">📱 +55 62 98209-3453</div>
                   <div className="text-gray-300">📱 +55 62 98306-8941</div>
                 </div>
+              </div>
+            ) : whatsappStatus === 'unavailable' ? (
+              <div className="text-center text-gray-400">
+                <div className="text-gray-300 mb-2">WhatsApp não disponível neste servidor</div>
+                <div className="text-xs">As notificações push continuarão funcionando normalmente.</div>
               </div>
             ) : whatsappQR ? (
               <div className="text-center">

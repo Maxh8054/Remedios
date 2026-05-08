@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import webpush from 'web-push';
 
 // Lazy initialization of web-push VAPID details
-// This avoids build-time errors when env vars are not available
 let vapidInitialized = false;
 
 function ensureVapidInit() {
@@ -18,14 +16,35 @@ function ensureVapidInit() {
   vapidInitialized = true;
 }
 
+// In-memory storage for push subscriptions
+// This works for serverless (Vercel) - subscriptions are lost on cold start
+// but re-register automatically when the user opens the app
+const subscriptions: Array<{ endpoint: string; p256dh: string; auth: string }> = [];
+
+// Try to use Prisma if available (for local/VPS deployment)
+async function getPrisma() {
+  try {
+    const { db } = await import('@/lib/db');
+    return db;
+  } catch {
+    return null;
+  }
+}
+
 // GET - List all subscriptions (used by notification service)
 export async function GET() {
   try {
-    const subscriptions = await db.pushSubscription.findMany();
+    const db = await getPrisma();
+    if (db) {
+      const subs = await db.pushSubscription.findMany();
+      return NextResponse.json({ subscriptions: subs });
+    }
+    // Fallback to in-memory
     return NextResponse.json({ subscriptions });
   } catch (error) {
     console.error('Error fetching subscriptions:', error);
-    return NextResponse.json({ error: 'Failed to fetch subscriptions' }, { status: 500 });
+    // Fallback to in-memory
+    return NextResponse.json({ subscriptions });
   }
 }
 
@@ -37,36 +56,61 @@ export async function POST(request: NextRequest) {
 
     // Handle subscription update (old endpoint replaced)
     if (oldEndpoint) {
-      await db.pushSubscription.deleteMany({
-        where: { endpoint: oldEndpoint }
-      });
+      const db = await getPrisma();
+      if (db) {
+        await db.pushSubscription.deleteMany({
+          where: { endpoint: oldEndpoint }
+        });
+      }
+      // Also remove from in-memory
+      const idx = subscriptions.findIndex(s => s.endpoint === oldEndpoint);
+      if (idx !== -1) subscriptions.splice(idx, 1);
     }
 
     if (!subscription || !subscription.endpoint) {
       return NextResponse.json({ error: 'Invalid subscription' }, { status: 400 });
     }
 
-    // Upsert subscription
-    const existing = await db.pushSubscription.findUnique({
-      where: { endpoint: subscription.endpoint }
-    });
-
-    if (existing) {
-      await db.pushSubscription.update({
-        where: { endpoint: subscription.endpoint },
-        data: {
-          p256dh: subscription.keys.p256dh,
-          auth: subscription.keys.auth,
-          updatedAt: new Date()
-        }
+    // Try Prisma first
+    const db = await getPrisma();
+    if (db) {
+      const existing = await db.pushSubscription.findUnique({
+        where: { endpoint: subscription.endpoint }
       });
+
+      if (existing) {
+        await db.pushSubscription.update({
+          where: { endpoint: subscription.endpoint },
+          data: {
+            p256dh: subscription.keys.p256dh,
+            auth: subscription.keys.auth,
+            updatedAt: new Date()
+          }
+        });
+      } else {
+        await db.pushSubscription.create({
+          data: {
+            endpoint: subscription.endpoint,
+            p256dh: subscription.keys.p256dh,
+            auth: subscription.keys.auth
+          }
+        });
+      }
+    }
+
+    // Always also store in memory as backup
+    const memIdx = subscriptions.findIndex(s => s.endpoint === subscription.endpoint);
+    if (memIdx !== -1) {
+      subscriptions[memIdx] = {
+        endpoint: subscription.endpoint,
+        p256dh: subscription.keys.p256dh,
+        auth: subscription.keys.auth
+      };
     } else {
-      await db.pushSubscription.create({
-        data: {
-          endpoint: subscription.endpoint,
-          p256dh: subscription.keys.p256dh,
-          auth: subscription.keys.auth
-        }
+      subscriptions.push({
+        endpoint: subscription.endpoint,
+        p256dh: subscription.keys.p256dh,
+        auth: subscription.keys.auth
       });
     }
 
@@ -88,9 +132,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Endpoint required' }, { status: 400 });
     }
 
-    await db.pushSubscription.deleteMany({
-      where: { endpoint }
-    });
+    // Try Prisma first
+    const db = await getPrisma();
+    if (db) {
+      await db.pushSubscription.deleteMany({
+        where: { endpoint }
+      });
+    }
+
+    // Also remove from in-memory
+    const idx = subscriptions.findIndex(s => s.endpoint === endpoint);
+    if (idx !== -1) subscriptions.splice(idx, 1);
 
     return NextResponse.json({ success: true });
   } catch (error) {
