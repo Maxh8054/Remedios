@@ -1,5 +1,4 @@
-node_modules
+node_modules/
 bun.lock
-.git
-.gitignore
-README.md
+package-lock.json
+*.log

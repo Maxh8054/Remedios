@@ -1,14 +1,14 @@
-services:
+databases:
   # ── PostgreSQL Database ──────────────────────────────────────────────
-  - type: pserv
-    name: pos-operatorio-db
+  - name: pos-operatorio-db
     plan: starter
     region: oregon
 
+services:
   # ── Next.js Main App ────────────────────────────────────────────────
   - type: web
     name: pos-operatorio-web
-    runtime: node
+    env: node
     repo: https://github.com/Maxh8054/Remedios
     region: oregon
     plan: starter
@@ -35,7 +35,7 @@ services:
   # ── Notification Service ────────────────────────────────────────────
   - type: web
     name: pos-operatorio-notif
-    runtime: docker
+    env: docker
     repo: https://github.com/Maxh8054/Remedios
     region: oregon
     plan: starter
@@ -58,12 +58,15 @@ services:
   # ── WhatsApp Service ────────────────────────────────────────────────
   - type: web
     name: pos-operatorio-whatsapp
-    runtime: docker
+    env: docker
     repo: https://github.com/Maxh8054/Remedios
     region: oregon
     plan: starter
     dockerContext: mini-services/whatsapp-service
     dockerfilePath: mini-services/whatsapp-service/Dockerfile
+    disks:
+      - name: whatsapp-auth
+        mountPath: /app/auth
     envVars:
       - key: PORT
         value: "10000"

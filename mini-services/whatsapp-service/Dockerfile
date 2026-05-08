@@ -6,11 +6,10 @@ WORKDIR /app
 COPY package.json ./
 RUN bun install --frozen-lockfile 2>/dev/null || bun install
 
-# Copy application source
+# Copy application source (auth/ comes from persistent disk on Render)
 COPY index.ts ./
-COPY auth/ ./auth/
 
-# Expose the service port
+# Expose the service port (Render overrides with PORT env var)
 EXPOSE 3040
 
 # Start the service

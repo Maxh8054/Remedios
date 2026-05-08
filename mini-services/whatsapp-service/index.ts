@@ -24,7 +24,7 @@ const __dirname = dirname(__filename);
 // Configuration
 // ---------------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || '3040', 10);
-const AUTH_FOLDER = join(__dirname, "auth");
+const AUTH_FOLDER = process.env.AUTH_FOLDER || join(__dirname, "auth");
 const QR_DATA_PATH = join(__dirname, "whatsapp-qr-data.txt");
 
 const DEFAULT_PHONES = [
