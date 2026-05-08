@@ -23,9 +23,9 @@ const __dirname = dirname(__filename);
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-const PORT = 3040;
+const PORT = parseInt(process.env.PORT || '3040', 10);
 const AUTH_FOLDER = join(__dirname, "auth");
-const QR_DATA_PATH = join(__dirname, "..", "..", "public", "whatsapp-qr-data.txt");
+const QR_DATA_PATH = join(__dirname, "whatsapp-qr-data.txt");
 
 const DEFAULT_PHONES = [
   "5562981206800",
@@ -105,7 +105,7 @@ async function connectWhatsApp(): Promise<void> {
         // Save QR data to file for the web app to generate image
         try {
           await writeFile(QR_DATA_PATH, qr, "utf-8");
-          console.log("📸 QR data saved to public/whatsapp-qr-data.txt");
+          console.log("📸 QR data saved to whatsapp-qr-data.txt");
         } catch (err) {
           console.error("Failed to save QR data:", err);
         }

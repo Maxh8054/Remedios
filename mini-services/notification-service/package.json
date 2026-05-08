@@ -2,9 +2,14 @@
   "name": "notification-service",
   "version": "1.0.0",
   "scripts": {
-    "dev": "bun --hot index.ts"
+    "dev": "bun --hot index.ts",
+    "start": "bun index.ts"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
   }
 }

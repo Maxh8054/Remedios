@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 
+const WHATSAPP_SERVICE_URL = process.env.WHATSAPP_SERVICE_URL || 'http://localhost:3040';
+
 export async function POST() {
   try {
-    const response = await fetch('http://localhost:3040/send-batch', {
+    const response = await fetch(`${WHATSAPP_SERVICE_URL}/send-batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

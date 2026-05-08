@@ -3,11 +3,12 @@
 // 1. Push notifications
 // 2. WhatsApp messages to configured numbers
 
+import express from 'express';
 import webpush from 'web-push';
 
-const PORT = 3030;
-const MAIN_APP_URL = 'http://localhost:3000';
-const WHATSAPP_SERVICE_URL = 'http://localhost:3040';
+const PORT = parseInt(process.env.PORT || '3030', 10);
+const MAIN_APP_URL = process.env.MAIN_APP_URL || 'http://localhost:3000';
+const WHATSAPP_SERVICE_URL = process.env.WHATSAPP_SERVICE_URL || 'http://localhost:3040';
 
 // WhatsApp phone numbers
 const WHATSAPP_NUMBERS = [
@@ -197,36 +198,44 @@ async function checkAndNotify() {
   }
 }
 
-// HTTP server
-const server = Bun.serve({
-  port: PORT,
-  fetch(req) {
-    const url = new URL(req.url);
-    if (url.pathname === '/health') {
-      return Response.json({ status: 'ok', service: 'notification-service', uptime: process.uptime() });
-    }
-    if (url.pathname === '/status') {
-      return Response.json({
-        status: 'running', sentCount: sentNotifications.size,
-        treatments: TRATAMENTOS.length, whatsappNumbers: WHATSAPP_NUMBERS,
-        timestamp: new Date().toISOString()
-      });
-    }
-    // Manual trigger for testing
-    if (url.pathname === '/trigger-test' && req.method === 'POST') {
-      const msg = `🧪 *TESTE DE NOTIFICAÇÃO*\n\nSistema de notificações do Pós-Operatório está funcionando!\n\n${new Date().toLocaleString('pt-BR')}`;
-      sendWhatsApp(msg);
-      return Response.json({ ok: true, message: 'Test WhatsApp sent' });
-    }
-    return new Response('Not Found', { status: 404 });
-  },
+// ── Express HTTP server ──────────────────────────────────────────────
+const app = express();
+app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'notification-service', uptime: process.uptime() });
 });
 
-console.log(`[NotifService] 🚀 Health check on port ${PORT}`);
-console.log('[NotifService] 🚀 Starting scheduler (checks every 30s)');
-console.log(`[NotifService] 📱 WhatsApp numbers: ${WHATSAPP_NUMBERS.join(', ')}`);
+// Status endpoint
+app.get('/status', (_req, res) => {
+  res.json({
+    status: 'running', sentCount: sentNotifications.size,
+    treatments: TRATAMENTOS.length, whatsappNumbers: WHATSAPP_NUMBERS,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Manual trigger for testing
+app.post('/trigger-test', (_req, res) => {
+  const msg = `🧪 *TESTE DE NOTIFICAÇÃO*\n\nSistema de notificações do Pós-Operatório está funcionando!\n\n${new Date().toLocaleString('pt-BR')}`;
+  sendWhatsApp(msg);
+  res.json({ ok: true, message: 'Test WhatsApp sent' });
+});
+
+// 404 fallback
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not Found' });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`[NotifService] 🚀 Health check on port ${PORT}`);
+  console.log('[NotifService] 🚀 Starting scheduler (checks every 30s)');
+  console.log(`[NotifService] 📱 WhatsApp numbers: ${WHATSAPP_NUMBERS.join(', ')}`);
+});
 
 checkAndNotify();
 setInterval(checkAndNotify, 30000);
 
-process.on('SIGINT', () => { server.stop(); process.exit(0); });
+process.on('SIGINT', () => { server.close(); process.exit(0); });
+process.on('SIGTERM', () => { server.close(); process.exit(0); });
